@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dynamic Product List — Demo</title>
+  <style>
+    /* Simple modern styling */
+    :root{
+      --bg: #f5f7fb;
+      --card:#ffffff;
+      --muted:#6b7280;
+      --accent:#2563eb;
+      --danger:#ef4444;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{
+      margin:0;
+      background:var(--bg);
+      color:#111827;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    .container{
+      max-width:1000px;
+      margin:36px auto;
+      padding:20px;
+    }
+    header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:18px;
+    }
+    h1{font-size:1.25rem;margin:0}
+    .cart{
+      display:flex;align-items:center;gap:10px;
+    }
+    .cart .count{
+      background:var(--accent);color:white;padding:6px 10px;border-radius:999px;font-weight:600;
+    }
+    .products{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;
+    }
+    .card{
+      background:var(--card);
+      border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06);
+      display:flex;flex-direction:column;gap:8px;
+    }
+    .product-name{font-weight:700}
+    .product-price{color:var(--accent);font-weight:700}
+    .meta{color:var(--muted);font-size:0.9rem}
+    button{cursor:pointer;border:0;padding:8px 10px;border-radius:8px}
+    .btn-add{background:var(--accent);color:white}
+    .btn-remove{background:var(--danger);color:white}
+    .cart-drawer{
+      position:fixed;right:20px;top:70px;min-width:260px;background:var(--card);padding:12px;border-radius:10px;box-shadow:0 10px 30px rgba(2,6,23,0.2);
+      display:none;flex-direction:column;gap:8px;
+    }
+    .cart-drawer.open{display:flex}
+    .cart-list{display:flex;flex-direction:column;gap:8px}
+    .cart-item{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .footer-note{margin-top:14px;color:var(--muted);font-size:0.9rem}
+    .controls{display:flex;gap:8px;align-items:center}
+    input[type="search"]{padding:8px;border-radius:8px;border:1px solid #e6e9ef;width:240px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Product Catalog</h1>
+        <div class="meta">Dynamic product list powered by a JavaScript array</div>
+      </div>
+
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search products..." aria-label="Search products" />
+        <div class="cart">
+          <button id="toggle-cart" aria-expanded="false">Cart</button>
+          <div class="count" id="cart-count">0</div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="products" class="products" aria-live="polite"></section>
+    </main>
+
+    <aside id="cart-drawer" class="cart-drawer" aria-hidden="true">
+      <strong>Shopping Cart</strong>
+      <div id="cart-list" class="cart-list"></div>
+      <div class="meta">Total: <span id="cart-total">₹0.00</span></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">
+        <button id="clear-cart" class="btn-remove">Clear</button>
+        <button id="checkout" class="btn-add">Checkout</button>
+      </div>
+    </aside>
+
+    <div class="footer-note">Tip: Edit the <code>products</code> array in the script to add/remove products.</div>
+  </div>
+
+  <script>
+    // ========= SAMPLE PRODUCTS ARRAY =========
+    // Each product object must have at least: id, name, price
+    const products = [
+      { id: 1, name: 'Wireless Headphones', price: 2999 },
+      { id: 2, name: 'Bluetooth Speaker', price: 1599 },
+      { id: 3, name: 'USB-C Charger', price: 799 },
+      { id: 4, name: 'Smart Watch', price: 4499 },
+      { id: 5, name: 'Laptop Stand', price: 1299 }
+    ];
+
+    // ========= STATE =========
+    const state = {
+      cart: new Map(), // key = productId, value = { product, qty }
+      filter: ''
+    };
+
+    // ========= DOM NODES =========
+    const productsRoot = document.getElementById('products');
+    const cartCount = document.getElementById('cart-count');
+    const cartDrawer = document.getElementById('cart-drawer');
+    const cartList = document.getElementById('cart-list');
+    const cartTotal = document.getElementById('cart-total');
+    const toggleCartBtn = document.getElementById('toggle-cart');
+    const clearCartBtn = document.getElementById('clear-cart');
+    const checkoutBtn = document.getElementById('checkout');
+    const searchInput = document.getElementById('search');
+
+    // ========== HELPERS ===========
+    function formatPrice(n){
+      // Format as INR with rupee symbol; change locale/currency if needed
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n);
+    }
+
+    function updateCartCount(){
+      let totalQty = 0;
+      for (const { qty } of state.cart.values()) totalQty += qty;
+      cartCount.textContent = totalQty;
+    }
+
+    function calculateCartTotal(){
+      let total = 0;
+      for (const { product, qty } of state.cart.values()) total += product.price * qty;
+      return total;
+    }
+
+    // ========== RENDER PRODUCTS ==========
+    function buildProductCard(product){
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const name = document.createElement('div');
+      name.className = 'product-name';
+      name.textContent = product.name;
+
+      const price = document.createElement('div');
+      price.className = 'product-price';
+      price.textContent = formatPrice(product.price);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `ID: ${product.id}`;
+
+      const btn = document.createElement('button');
+      btn.className = 'btn-add';
+      btn.textContent = 'Add to Cart';
+      btn.setAttribute('aria-label', `Add ${product.name} to cart`);
+      btn.addEventListener('click', () => addToCart(product));
+
+      card.append(name, price, meta, btn);
+      return card;
+    }
+
+    function renderProducts(){
+      productsRoot.innerHTML = '';
+      const filtered = products.filter(p => p.name.toLowerCase().includes(state.filter.toLowerCase()));
+      if(filtered.length === 0){
+        productsRoot.innerHTML = '<div class="meta">No products found.</div>';
+        return;
+      }
+      for(const p of filtered){
+        productsRoot.appendChild(buildProductCard(p));
+      }
+    }
+
+    // ========== CART FUNCTIONS ==========
+    function addToCart(product){
+      const entry = state.cart.get(product.id);
+      if(entry){
+        entry.qty += 1;
+      } else {
+        state.cart.set(product.id, { product, qty: 1 });
+      }
+      updateCartCount();
+      renderCartList();
+      // Optional: briefly animate or provide feedback
+    }
+
+    function removeFromCart(productId){
+      state.cart.delete(productId);
+      updateCartCount();
+      renderCartList();
+    }
+
+    function changeQty(productId, delta){
+      const entry = state.cart.get(productId);
+      if(!entry) return;
+      entry.qty += delta;
+      if(entry.qty <= 0) state.cart.delete(productId);
+      updateCartCount();
+      renderCartList();
+    }
+
+    function renderCartList(){
+      cartList.innerHTML = '';
+      if(state.cart.size === 0){
+        cartList.innerHTML = '<div class="meta">Your cart is empty.</div>';
+        cartTotal.textContent = formatPrice(0);
+        return;
+      }
+
+      for(const [id, { product, qty }] of state.cart.entries()){
+        const row = document.createElement('div');
+        row.className = 'cart-item';
+
+        const left = document.createElement('div');
+        left.textContent = `${product.name} × ${qty}`;
+
+        const right = document.createElement('div');
+        right.style.display = 'flex'; right.style.gap = '6px'; right.style.alignItems = 'center';
+
+        const plus = document.createElement('button'); plus.textContent = '+'; plus.addEventListener('click', ()=> changeQty(id, +1));
+        const minus = document.createElement('button'); minus.textContent = '−'; minus.addEventListener('click', ()=> changeQty(id, -1));
+        const remove = document.createElement('button'); remove.textContent = 'Remove'; remove.className = 'btn-remove'; remove.addEventListener('click', ()=> removeFromCart(id));
+
+        const linePrice = document.createElement('div');
+        linePrice.textContent = formatPrice(product.price * qty);
+
+        right.append(plus, minus, remove, linePrice);
+        row.append(left, right);
+        cartList.appendChild(row);
+      }
+
+      cartTotal.textContent = formatPrice(calculateCartTotal());
+    }
+
+    function clearCart(){
+      state.cart.clear();
+      updateCartCount();
+      renderCartList();
+    }
+
+    // ========== UI ACTIONS ==========
+    toggleCartBtn.addEventListener('click', ()=>{
+      const open = cartDrawer.classList.toggle('open');
+      cartDrawer.setAttribute('aria-hidden', String(!open));
+      toggleCartBtn.setAttribute('aria-expanded', String(open));
+    });
+
+    clearCartBtn.addEventListener('click', clearCart);
+    checkoutBtn.addEventListener('click', ()=> alert('Checkout demo — no real payment here.'));
+
+    searchInput.addEventListener('input', (e)=>{
+      state.filter = e.target.value;
+      renderProducts();
+    });
+
+    // ========== INITIALIZE ==========
+    renderProducts();
+    renderCartList();
+
+    // Expose for debug / live editing in console
+    window.__APP = { products, state, addToCart, clearCart };
+  </script>
+</body>
+</html>
